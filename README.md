@@ -1,156 +1,142 @@
-# Daily News
+# 📰 Daily News
 
-Uma landing page que resume, em um parágrafo por assunto, o que aconteceu no dia anterior.
+> O resumo do dia anterior — **as principais notícias por assunto**, sintetizadas por IA em um parágrafo cada.
 
-Todo dia de madrugada a aplicação busca as principais notícias por categoria, pede a uma IA que sintetize cada assunto em um texto curto, e guarda tudo no banco. A página lê o resultado pronto.
+Aplicação backend que, todo dia de madrugada, coleta as notícias mais relevantes de cada categoria, pede a um modelo de linguagem que escreva um panorama do assunto, e guarda tudo pronto. A página só lê o resultado.
 
 ---
 
-## O problema
+## 📋 Sobre o projeto
 
-Acompanhar notícias exige abrir vários sites, filtrar repetição e separar o que importa. A proposta aqui é inverter isso: uma página só, organizada por assunto, com um panorama escrito e as matérias originais logo abaixo.
+Acompanhar notícias exige abrir vários sites, filtrar repetição e separar o que importa. O Daily News inverte isso: uma página só, organizada por assunto, com um panorama escrito e as matérias originais logo abaixo.
 
 A escolha de mostrar **o dia anterior** (e não "as últimas notícias") é deliberada: um dia fechado tem começo e fim, não muda enquanto você lê, e dá tempo para os fatos se consolidarem.
 
----
-
-## Como funciona
+**O ciclo que conecta tudo:**
 
 ```
-        04:00 (job agendado)
-             │
-             ├─► GNews API ──► notícias do dia anterior, por categoria
-             │                        │
-             │                        └─► PostgreSQL
-             │
-             └─► Groq (LLM) ──► um resumo por categoria
-                                      │
-                                      └─► PostgreSQL
-
-        Requisição do usuário
-             │
-             └─► GET /daily-news/{categoria} ──► { categoria, resumo, notícias }
+notícias de ontem → síntese por IA → persistência → leitura instantânea
 ```
 
-O job roda sozinho uma vez por dia. A página nunca chama a GNews nem a IA — ela só lê o que já foi processado, o que mantém o carregamento rápido e o consumo das APIs externas previsível (9 chamadas por dia para cada uma).
+---
+
+## ✨ Funcionalidades
+
+- ⏰ **Job agendado** — roda sozinho às 4h, com horário configurável por cron
+- 📥 **Coleta por categoria** — busca as notícias do dia anterior em 9 assuntos, filtrando por idioma, país e intervalo de datas
+- 🤖 **Resumo por IA** — um panorama por categoria, gerado a partir das notícias coletadas
+- 🔁 **Idempotência** — rodar o job duas vezes no mesmo dia não duplica nada nem gasta cota à toa
+- 🛡️ **Tolerância a falha** — se uma categoria falhar, as outras continuam; sem IA, a página ainda mostra as notícias
+- 🌐 **API REST** — resposta com resumo e notícias num envelope só, e `404` para categoria inexistente
+- 🌗 **Interface com tema claro/escuro**, navegação por assunto e link para a matéria original
 
 ---
 
-## Stack
+## 🏗️ Arquitetura
 
-| Tecnologia | Por quê |
-|---|---|
-| **Java 23 + Spring Boot 4.1** | Framework dominante no mercado Java; ecossistema maduro para agendamento, acesso a dados e API REST |
-| **PostgreSQL 16** | Dados estruturados e relacionais (notícia pertence a categoria); mais próximo de ambiente real que um banco embarcado |
-| **Docker Compose** | Sobe o banco com um comando, com volume para persistir dados entre reinicializações |
-| **Maven** | Build e dependências |
-| **GNews API** | Fonte das notícias; aceita filtro por categoria, idioma, país e intervalo de datas |
-| **Groq** (`openai/gpt-oss-120b`) | Inferência de LLM com modelos open-source e plano gratuito |
-| **HTML/CSS/JS puros** | A página é simples demais para justificar um framework e um passo de build |
+```
+        ┌──────────────┐
+  04:00 │  agendamento │  orquestra a escrita
+        └──────┬───────┘
+               │
+       ┌───────┴────────┐
+       ▼                ▼
+ ┌───────────┐    ┌───────────┐      ┌──────────────┐
+ │  noticia  │    │  resumo   │ ───► │  PostgreSQL  │
+ │  (GNews)  │    │  (Groq)   │      │   (Docker)   │
+ └───────────┘    └───────────┘      └──────┬───────┘
+                                            │
+        ┌──────────────┐                    │
+        │     feed     │ ◄──────────────────┘
+        └──────┬───────┘  orquestra a leitura
+               │
+               ▼
+   GET /daily-news/{categoria}
+```
 
----
-
-## Decisões de arquitetura
-
-### Pacotes por domínio, não por camada
-
-Cada domínio (`categoria`, `noticia`, `resumo`) carrega suas próprias entidades, repositórios e serviços. O que muda junto fica junto.
-
-### Os domínios não se conhecem
-
-`noticia` e `resumo` não têm referência um ao outro. Quem os conecta são dois orquestradores:
-
-- **`agendamento`** coordena a escrita: busca notícias, entrega ao resumo, persiste
-- **`feed`** coordena a leitura: junta notícias e resumo em uma resposta só
-
-O `ResumoService` **recebe** a lista de notícias como parâmetro em vez de buscá-la. Isso o torna testável sem banco e reutilizável para resumir qualquer conjunto de notícias.
-
-### Resumo por categoria, não por notícia
-
-A ideia inicial era resumir cada matéria individualmente. Ao inspecionar a resposta real da GNews, ficou claro que o plano gratuito **trunca o conteúdo** em ~200 caracteres — e a própria API já devolve uma descrição curta. Resumir um resumo não agregava nada.
-
-A solução foi mudar o que a IA faz: sintetizar **as notícias de uma categoria em um panorama único**. Mais fiel à proposta original e viável com o material disponível.
-
-### Operações idempotentes
-
-Rodar o job duas vezes no mesmo dia não duplica nada:
-
-- notícias são identificadas pela URL (`unique`)
-- resumos, pela combinação categoria + data (`unique` composta)
-- categorias, pelo nome
-
-As garantias estão no **banco**, não apenas no código — o que protege contra qualquer caminho de escrita.
-
-### Falha em uma categoria não derruba o job
-
-O processamento de cada categoria é isolado. Se a IA estiver indisponível, as notícias ainda são salvas e a página funciona sem os resumos — degradação graciosa em vez de página vazia.
-
-### Datas em um lugar só
-
-"Qual é o dia de ontem" depende de fuso horário e era calculado em três classes diferentes. A regra foi extraída para um componente `Calendario`, que concentra a única declaração do fuso do projeto.
+- **Pacotes por domínio** (`categoria`, `noticia`, `resumo`), não por camada técnica
+- **`noticia` e `resumo` não se conhecem** — quem os conecta são dois orquestradores: `agendamento` (escrita) e `feed` (leitura)
+- **Frontend servido pela própria aplicação**, o que elimina CORS e mantém um deploy só
 
 ---
 
-## Como rodar
+## 🧠 Decisões de arquitetura
 
-### Pré-requisitos
+**Resumo por categoria, não por notícia.** A ideia inicial era resumir cada matéria. Ao inspecionar a resposta real da GNews, ficou claro que o plano gratuito trunca o conteúdo em ~200 caracteres — e a API já devolve uma descrição curta. Resumir um resumo não agregava nada. A solução foi mudar o que a IA faz: sintetizar as notícias de uma categoria em um panorama único.
 
-- Java 23
-- Docker e Docker Compose
-- Chave da [GNews API](https://gnews.io) (plano gratuito)
-- Chave da [Groq](https://console.groq.com) (plano gratuito)
+**Processar no job, não sob demanda.** A página nunca chama API externa. O consumo é fixo em 9 chamadas por API por dia, independente do tráfego — e o carregamento é instantâneo.
 
-### 1. Variáveis de ambiente
+**Garantias no banco, não só no código.** Notícias são únicas por URL; resumos, pela combinação categoria + data. As restrições vivem no schema, protegendo contra qualquer caminho de escrita.
 
-Copie o arquivo de exemplo e preencha com seus valores:
+**Dependências recebidas, não buscadas.** O `ResumoService` recebe a lista de notícias por parâmetro em vez de consultar o banco — o que o torna testável sem infraestrutura. O mesmo vale para o relógio: o cálculo de datas e o fuso ficam num único componente injetável.
 
+---
+
+## 🛠️ Tecnologias
+
+**Backend**
+- Java 23 · Spring Boot 4.1
+- Spring Data JPA · PostgreSQL 16
+- Spring Scheduling (`@Scheduled`) · RestClient
+- Maven · Docker Compose
+
+**Frontend**
+- HTML · CSS · JavaScript (sem framework ou build)
+
+**Integrações**
+- [GNews API](https://gnews.io) — fonte das notícias
+- [Groq](https://console.groq.com) — inferência de LLM (`openai/gpt-oss-120b`)
+
+---
+
+## 📸 Demonstração
+
+<!--
+  Adicione prints em uma pasta /docs e referencie aqui, por exemplo:
+  ![Página inicial](docs/home.png)
+  ![Resumo por categoria](docs/categoria.png)
+-->
+
+---
+
+## 💻 Rodando localmente
+
+**Pré-requisitos:** Java 23, Docker, chave da [GNews](https://gnews.io) e da [Groq](https://console.groq.com) (ambas com plano gratuito).
+
+**1. Configure as variáveis de ambiente:**
 ```bash
 cp .env.example .env
 ```
 
-### 2. Suba o banco
-
+**2. Suba o banco (PostgreSQL via Docker):**
 ```bash
 docker compose up -d
 ```
 
-O PostgreSQL fica disponível em `localhost:5433`.
-
-### 3. Rode a aplicação
-
+**3. Rode a aplicação:**
 ```bash
 ./mvnw spring-boot:run
 ```
 
-> As variáveis do `.env` precisam estar carregadas no ambiente. Na IDE, use um plugin como o EnvFile; no terminal, exporte-as antes de rodar.
+> As variáveis do `.env` precisam estar carregadas no ambiente — via plugin EnvFile na IDE, ou exportadas no shell.
 
-Na primeira execução, as tabelas e as categorias são criadas automaticamente.
+A aplicação sobe em `http://localhost:8080`, cria as tabelas e popula as categorias automaticamente.
 
-### 4. Acesse
-
-```
-http://localhost:8080
-```
-
-### Disparando o job manualmente
-
-O job roda às 4h por padrão. Para testar sem esperar, ajuste o cron no `application.properties` para alguns minutos à frente e reinicie:
-
+**Disparando o job sem esperar as 4h:** ajuste o cron no `application.properties` para alguns minutos à frente e reinicie.
 ```properties
 cron.daily=0 30 14 * * *
 ```
 
 ---
 
-## Endpoints
+## 📚 Principais endpoints
 
-### `GET /daily-news/categorias`
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/daily-news/categorias` | Lista as categorias disponíveis |
+| `GET` | `/daily-news/{categoria}` | Resumo do dia + notícias da categoria |
 
-```json
-[{ "nome": "sports" }, { "nome": "health" }]
-```
-
-### `GET /daily-news/{categoria}`
+**Exemplo de resposta:**
 
 ```json
 {
@@ -169,16 +155,22 @@ cron.daily=0 30 14 * * *
 }
 ```
 
-Categoria inexistente retorna **404**.
+> Categoria inexistente retorna `404 Not Found`.
 
 ---
 
-## Limitações conhecidas
+## 🚧 Limitações conhecidas
 
-- **Sem testes automatizados.** A verificação foi manual durante o desenvolvimento. É a próxima prioridade.
-- **Schema gerenciado por `ddl-auto=update`.** Funciona em desenvolvimento, mas não remove colunas obsoletas nem altera tipos existentes. O caminho correto é migração versionada (Flyway).
-- **Categorias em inglês.** São as categorias nativas da GNews. A tradução para exibição está no frontend; o ideal seria um rótulo no próprio modelo.
-- **Sem deduplicação por conteúdo.** Dois veículos publicando a mesma história geram duas entradas, já que as URLs diferem.
-- **Instância única.** Rodar várias cópias faria o job disparar em paralelo e consumir a cota multiplicada. Resolver isso exigiria um lock distribuído.
-- **Limites do plano gratuito.** A GNews permite 100 requisições/dia e entrega notícias com 12h de atraso — irrelevante aqui, já que o conteúdo exibido é sempre do dia anterior.
-- **Tamanho do resumo não é garantido.** O limite é pedido no prompt, e modelos de linguagem tratam isso como orientação aproximada.
+- **Sem testes automatizados** — verificação manual durante o desenvolvimento; é a próxima prioridade
+- **Schema por `ddl-auto=update`** — funciona em desenvolvimento, mas não remove colunas obsoletas nem altera tipos; o caminho correto é migração versionada (Flyway)
+- **Categorias em inglês** — são as nativas da GNews; a tradução para exibição está no frontend
+- **Sem deduplicação por conteúdo** — dois veículos publicando a mesma história geram duas entradas, já que as URLs diferem
+- **Instância única** — múltiplas cópias disparariam o job em paralelo, multiplicando o consumo de cota
+- **Plano gratuito da GNews** — 100 requisições/dia e 12h de atraso nas notícias (irrelevante aqui, já que o conteúdo é sempre do dia anterior)
+
+---
+
+## 👤 Autor
+
+**Leonardo Hideki**
+[LinkedIn](https://www.linkedin.com/in/leonardohidekikuriki/) · [GitHub](https://github.com/HidekiLeonardo)
