@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily News — o resumo de ontem</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --border: #e3e6ea;
+    --text: #15181d;
+    --muted: #666e7a;
+    --accent: #1f5fd6;
+    --accent-soft: #eaf0fd;
+    --radius: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #101317;
+      --surface: #171b21;
+      --border: #272d36;
+      --text: #e9ecf1;
+      --muted: #96a0ad;
+      --accent: #6ea0ff;
+      --accent-soft: #1a2436;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.55;
+  }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
+
+  header { margin-bottom: 28px; }
+
+  h1 {
+    margin: 0 0 4px;
+    font-size: 1.9rem;
+    letter-spacing: -0.02em;
+  }
+
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0; }
+
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 24px 0 28px;
+  }
+
+  nav button {
+    font: inherit;
+    font-size: 0.88rem;
+    padding: 7px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  nav button:hover { color: var(--text); border-color: var(--muted); }
+
+  nav button[aria-current="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .resumo {
+    background: var(--accent-soft);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+    margin-bottom: 32px;
+  }
+
+  .resumo .rotulo {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .resumo p { margin: 0; font-size: 1.02rem; }
+
+  .lista { display: flex; flex-direction: column; gap: 16px; }
+
+  article {
+    display: flex;
+    gap: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+
+  article:hover { border-color: var(--accent); transform: translateY(-1px); }
+
+  article img {
+    width: 150px;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 8px;
+    flex-shrink: 0;
+    background: var(--bg);
+  }
+
+  article h2 { margin: 0 0 6px; font-size: 1.04rem; line-height: 1.35; }
+
+  article p {
+    margin: 0 0 10px;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
+  .meta { font-size: 0.78rem; color: var(--muted); }
+
+  .meta .fonte { color: var(--accent); font-weight: 600; }
+
+  .aviso {
+    padding: 28px;
+    text-align: center;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+
+  @media (max-width: 620px) {
+    article { flex-direction: column; }
+    article img { width: 100%; height: 170px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Daily News</h1>
+    <p class="sub" id="subtitulo">O que aconteceu ontem, em um parágrafo por assunto.</p>
+  </header>
+
+  <nav id="nav"></nav>
+
+  <div id="conteudo">
+    <div class="aviso">Carregando…</div>
+  </div>
+
+</div>
+
+<script>
+  // Tradução dos nomes técnicos vindos do backend. Se aparecer uma
+  // categoria nova que não está aqui, o próprio nome é usado como rótulo.
+  const ROTULOS = {
+    general:       "Geral",
+    world:         "Mundo",
+    nation:        "Brasil",
+    business:      "Economia",
+    technology:    "Tecnologia",
+    science:       "Ciência",
+    health:        "Saúde",
+    sports:        "Esportes",
+    entertainment: "Entretenimento"
+  };
+
+  const nav = document.getElementById("nav");
+  const conteudo = document.getElementById("conteudo");
+
+  let CATEGORIAS = [];
+  let ativa = null;
+
+  function montarNav() {
+    nav.innerHTML = "";
+    for (const cat of CATEGORIAS) {
+      const btn = document.createElement("button");
+      btn.textContent = cat.rotulo;
+      btn.setAttribute("aria-current", cat.id === ativa ? "true" : "false");
+      btn.addEventListener("click", () => {
+        ativa = cat.id;
+        montarNav();
+        carregar();
+      });
+      nav.appendChild(btn);
+    }
+  }
+
+  function dataOntemFormatada() {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toLocaleDateString("pt-BR", {
+      weekday: "long", day: "2-digit", month: "long", year: "numeric"
+    });
+  }
+
+  function formatarHora(iso) {
+    try {
+      return new Date(iso).toLocaleString("pt-BR", {
+        day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+      });
+    } catch {
+      return "";
+    }
+  }
+
+  function escapar(texto) {
+    const div = document.createElement("div");
+    div.textContent = texto ?? "";
+    return div.innerHTML;
+  }
+
+  function renderizar(feed) {
+    if (!feed.noticias || feed.noticias.length === 0) {
+      conteudo.innerHTML = `<div class="aviso">Nenhuma notícia registrada para este assunto ontem.</div>`;
+      return;
+    }
+
+    const cards = feed.noticias.map(n => `
+      <a class="card-link" href="${escapar(n.url)}" target="_blank" rel="noopener noreferrer"
+         style="text-decoration:none;color:inherit">
+        <article>
+          ${n.imagem ? `<img src="${escapar(n.imagem)}" alt="" loading="lazy"
+                            onerror="this.remove()">` : ""}
+          <div>
+            <h2>${escapar(n.titulo)}</h2>
+            <p>${escapar(n.descricao)}</p>
+            <div class="meta">
+              <span class="fonte">${escapar(n.fonte)}</span> · ${formatarHora(n.data)}
+            </div>
+          </div>
+        </article>
+      </a>
+    `).join("");
+
+    conteudo.innerHTML = `
+      <section class="resumo">
+        <div class="rotulo">Resumo do dia</div>
+        <p>${escapar(feed.resumo)}</p>
+      </section>
+      <div class="lista">${cards}</div>
+    `;
+  }
+
+  async function carregar() {
+    conteudo.innerHTML = `<div class="aviso">Carregando…</div>`;
+    try {
+      const resposta = await fetch(`/daily-news/${ativa}`);
+      if (!resposta.ok) {
+        throw new Error("HTTP " + resposta.status);
+      }
+      renderizar(await resposta.json());
+    } catch (erro) {
+      conteudo.innerHTML = `<div class="aviso">Não foi possível carregar as notícias.<br>
+        <small>${escapar(erro.message)}</small></div>`;
+    }
+  }
+
+  async function carregarCategorias() {
+    const resposta = await fetch("/daily-news/categorias");
+    if (!resposta.ok) {
+      throw new Error("HTTP " + resposta.status);
+    }
+
+    const lista = await resposta.json();
+    CATEGORIAS = lista.map(c => ({
+      id: c.nome,
+      rotulo: ROTULOS[c.nome] ?? (c.nome.charAt(0).toUpperCase() + c.nome.slice(1))
+    }));
+  }
+
+  async function iniciar() {
+    document.getElementById("subtitulo").textContent =
+      "O que aconteceu em " + dataOntemFormatada() + ", resumido por assunto.";
+
+    try {
+      await carregarCategorias();
+    } catch (erro) {
+      conteudo.innerHTML = `<div class="aviso">Não foi possível carregar as categorias.<br>
+        <small>${escapar(erro.message)}</small></div>`;
+      return;
+    }
+
+    if (CATEGORIAS.length === 0) {
+      conteudo.innerHTML = `<div class="aviso">Nenhuma categoria cadastrada.</div>`;
+      return;
+    }
+
+    ativa = CATEGORIAS[0].id;
+    montarNav();
+    carregar();
+  }
+
+  iniciar();
+</script>
+</body>
+</html>
