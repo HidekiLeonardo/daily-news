@@ -89,16 +89,6 @@ notícias de ontem → síntese por IA → persistência → leitura instantâne
 
 ---
 
-## 📸 Demonstração
-
-<!--
-  Adicione prints em uma pasta /docs e referencie aqui, por exemplo:
-  ![Página inicial](docs/home.png)
-  ![Resumo por categoria](docs/categoria.png)
--->
-
----
-
 ## 💻 Rodando localmente
 
 **Pré-requisitos:** Java 23, Docker, chave da [GNews](https://gnews.io) e da [Groq](https://console.groq.com) (ambas com plano gratuito).
